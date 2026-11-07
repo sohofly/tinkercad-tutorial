@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tinkercad 功能動畫教室</title>
+<meta name="description" content="生活科技 3D 建模教學：點選 Tinkercad 功能圖示觀看示範動畫，或上傳物品照片由 AI 建議操作並產生建模模擬。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M20 4l14 8v16l-14 8-14-8V12z' fill='%23e8432f'/%3E%3Cpath d='M20 20l14-8v16l-14 8z' fill='%23000' opacity='.25'/%3E%3C/svg%3E">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three-mesh-bvh": "./vendor/three-mesh-bvh.module.js",
+  "three-bvh-csg": "./vendor/three-bvh-csg.module.js"
+} }
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo"><i></i><i></i><i></i><i></i></span>
+    <div><h1>Tinkercad 功能動畫教室</h1><p>生活科技 · 3D 建模入門</p></div>
+  </div>
+  <nav class="tabs">
+    <button class="tab on" data-tab="demo">① 功能示範動畫</button>
+    <button class="tab" data-tab="ai">② 拍照 → AI 建模建議</button>
+  </nav>
+</header>
+
+<main id="page-demo" class="page">
+  <aside class="side" id="feature-list" aria-label="功能列表"></aside>
+  <section class="player" id="player-demo">
+    <div class="stage-area"></div>
+    <div class="controls">
+      <button data-c="replay"></button>
+      <button data-c="pause"></button>
+      <div class="speed"><span>速度</span><button data-speed="0.5">0.5×</button><button data-speed="1" class="on">1×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2×</button></div>
+      <div class="caption"></div>
+    </div>
+  </section>
+  <aside class="info" id="info"></aside>
+</main>
+
+<main id="page-ai" class="page" hidden>
+  <aside class="side ai-form">
+    <section class="card" id="dropzone">
+      <h3>1. 上傳同一物品的照片 <small>1~3 張，不同角度更準確</small></h3>
+      <input type="file" id="file-in" accept="image/*" multiple hidden>
+      <div class="thumbs" id="thumbs"></div>
+      <textarea id="note" rows="2" placeholder="（選填）補充說明，例如：這是筆筒，高約 10 公分"></textarea>
+    </section>
+    <section class="card">
+      <h3>2. OpenAI API 設定</h3>
+      <label class="fld">API 金鑰
+        <span class="keyrow"><input id="api-key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false"><button id="toggle-key" type="button" title="顯示/隱藏">👁</button></span>
+      </label>
+      <label class="chk"><input type="checkbox" id="remember"> 記住金鑰（只存在這台電腦的瀏覽器）</label>
+      <label class="fld">模型
+        <input id="model" list="models" placeholder="gpt-4o-mini">
+        <datalist id="models"><option value="gpt-4o-mini"><option value="gpt-4o"><option value="gpt-4.1-mini"><option value="gpt-4.1"><option value="gpt-5-mini"></datalist>
+      </label>
+      <p class="hint">金鑰只會從你的瀏覽器直接送到 OpenAI，不經過任何其他伺服器。課堂公用電腦請勿勾選「記住」。</p>
+    </section>
+    <button id="btn-analyze" class="primary" disabled>✦ 分析照片並產生建模動畫</button>
+    <div id="ai-status" class="status"></div>
+    <section class="card samples-card">
+      <h3>沒有金鑰？先看範例</h3>
+      <div id="samples" class="samples"></div>
+    </section>
+  </aside>
+  <section class="player" id="player-ai">
+    <div class="stage-area"></div>
+    <div class="controls">
+      <button data-c="replay"></button>
+      <button data-c="pause"></button>
+      <div class="speed"><span>速度</span><button data-speed="0.5">0.5×</button><button data-speed="1" class="on">1×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2×</button></div>
+      <div class="caption">上傳照片後按「分析」，或點左下角的範例。</div>
+    </div>
+  </section>
+  <aside class="info">
+    <div id="ai-empty" class="empty">
+      <h2>AI 建模建議</h2>
+      <p>AI 會辨識照片中的物品，把它拆解成 Tinkercad 的基本形狀，並告訴你：</p>
+      <ul class="tips"><li>需要用到哪些操作功能、為什麼</li><li>每個零件的形狀、尺寸、位置</li><li>依序操作的建模步驟</li></ul>
+      <p>中間的視窗會自動播放整個建模過程的模擬動畫。</p>
+    </div>
+    <div id="ai-result" hidden></div>
+  </aside>
+</main>
+
+<footer class="foot">本頁為教學模擬，介面為示意，非 Autodesk 官方產品。3D 引擎：three.js（MIT）、three-bvh-csg（MIT）。</footer>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
