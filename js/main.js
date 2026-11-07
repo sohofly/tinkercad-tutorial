@@ -5,6 +5,7 @@ import { playPlan, sanitizePlan, toAIJson, SAMPLES } from './plan.js';
 import { analyzePhotos, reviewPlan, shrinkImage } from './ai.js';
 import { snapshotPlan, exportSTL } from './scene.js';
 import { recordAnimation, canRecord, saveBlob } from './recorder.js';
+import { unlock } from './vault.js';
 import { FICON, SICON } from './icons.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -49,6 +50,7 @@ function makePlayer(root, getName) {
   const pauseBtn = $('[data-c=pause]', ctrl);
   const setPaused = p => { stage.tl.paused = p; pauseBtn.innerHTML = (p ? FICON.play : FICON.pause) + `<span>${p ? '繼續' : '暫停'}</span>`; };
   pauseBtn.onclick = () => setPaused(!stage.tl.paused);
+  setPaused(false);
   $$('[data-speed]', ctrl).forEach(b => b.onclick = () => { stage.tl.speed = +b.dataset.speed; $$('[data-speed]', ctrl).forEach(x => x.classList.toggle('on', x === b)); });
   $('[data-c=replay]', ctrl).innerHTML = FICON.replay + '<span>重播</span>';
   const cap = $('.caption', ctrl);
@@ -101,6 +103,7 @@ function toast(msg) {
 function showTab(name) {
   $$('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   $$('.page').forEach(p => p.hidden = p.id !== 'page-' + name);
+  try { history.replaceState(null, '', '#' + (name === 'ai' ? 'ai' : (current ? current.id : ''))); } catch { /* ignore */ }
 }
 $$('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 
@@ -119,7 +122,7 @@ function playFeature(id, scroll) {
     <p class="desc">${esc(f.desc)}</p>
     <h4>操作步驟</h4><ol class="steps">${f.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
     <h4>小提醒</h4><ul class="tips">${f.tips.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
-  try { history.replaceState(null, '', '#' + f.id); } catch { /* ignore */ }
+  if (!$('#page-demo').hidden) try { history.replaceState(null, '', '#' + f.id); } catch { /* ignore */ }
   if (scroll && window.innerWidth < 900) $('#player-demo').scrollIntoView({ behavior: 'smooth' });
   P1.caption(`<b>${f.name}</b>　準備示範…`);
   P1.run(D => f.run(D), {
@@ -155,12 +158,36 @@ const dz = $('#dropzone');
 dz.addEventListener('drop', e => addFiles(e.dataTransfer.files));
 renderThumbs();
 
-const keyIn = $('#api-key'), remember = $('#remember'), modelIn = $('#model');
-keyIn.value = store.get('tc_openai_key') || ''; remember.checked = !!keyIn.value;
+const modelIn = $('#model');
+store.set('tc_openai_key', null); // 舊版存過的明碼金鑰一律清除
 modelIn.value = store.get('tc_openai_model2') || 'gpt-5-mini';
-const saveKey = () => { store.set('tc_openai_key', remember.checked && keyIn.value ? keyIn.value.trim() : null); store.set('tc_openai_model2', modelIn.value.trim() || null); };
-remember.onchange = saveKey; keyIn.onchange = saveKey; modelIn.onchange = saveKey;
-$('#toggle-key').onclick = () => { keyIn.type = keyIn.type === 'password' ? 'text' : 'password'; };
+const saveKey = () => { store.set('tc_openai_model2', modelIn.value.trim() || null); };
+modelIn.onchange = saveKey;
+
+/* ---------- 密碼鎖 ---------- */
+let apiKey = null;
+const pageAI = $('#page-ai'), lockMsg = $('#lock-msg');
+function setUnlocked(res) {
+  apiKey = res ? res.apiKey : null;
+  pageAI.classList.toggle('locked', !res);
+  if (res) $('#unlock-who').textContent = `🔓 已解鎖${res.label ? '（' + res.label + '）' : ''}`;
+}
+async function tryUnlock(pw, rememberIt, silent) {
+  if (!silent) { lockMsg.className = 'status busy'; lockMsg.innerHTML = '<span class="spin"></span>驗證中…'; }
+  const res = await unlock(pw);
+  if (!res) {
+    if (silent) store.set('tc_ai_pw', null);
+    else { lockMsg.className = 'status err'; lockMsg.textContent = '⚠ 密碼不正確'; }
+    return false;
+  }
+  if (rememberIt) store.set('tc_ai_pw', pw);
+  lockMsg.className = 'status'; lockMsg.textContent = '';
+  setUnlocked(res); return true;
+}
+$('#lock-form').onsubmit = e => { e.preventDefault(); const pw = $('#ai-pw').value; if (pw) tryUnlock(pw, $('#remember-pw').checked).then(ok => ok && ($('#ai-pw').value = '')); };
+$('#toggle-pw').onclick = () => { const i = $('#ai-pw'); i.type = i.type === 'password' ? 'text' : 'password'; };
+$('#btn-lock').onclick = () => { store.set('tc_ai_pw', null); setUnlocked(null); };
+{ const saved = store.get('tc_ai_pw'); if (saved) tryUnlock(saved, true, true); }
 
 const status = $('#ai-status');
 function setStatus(html, cls = '') { status.className = 'status ' + cls; status.innerHTML = html; }
@@ -175,7 +202,8 @@ $('#btn-analyze').onclick = async () => {
   const busy = msg => { clearInterval(tick); const f = () => setStatus(`<span class="spin"></span>${msg}（${sec()} 秒）`, 'busy'); f(); tick = setInterval(f, 1000); };
   try {
     const images = await Promise.all(photos.map(p => shrinkImage(p.file)));
-    const opts = { key: keyIn.value, model: modelIn.value.trim(), images, note: $('#note').value.trim() };
+    if (!apiKey) throw new Error('請先輸入密碼解鎖');
+    const opts = { key: apiKey, model: modelIn.value.trim(), images, note: $('#note').value.trim() };
     busy(`第 1 步：AI 觀察照片並規劃建模${refineIn.checked ? '（共 2 步）' : ''}…`);
     let p1 = sanitizePlan(await analyzePhotos(opts)), checked = false;
     if (refineIn.checked) {
