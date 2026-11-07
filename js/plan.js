@@ -12,15 +12,25 @@ export function sanitizePlan(raw) {
   const parts = (Array.isArray(p.parts) ? p.parts : []).slice(0, 16).map((x, i) => {
     const shape = SHAPES[x.shape] ? x.shape : 'box';
     const size = vec3(x.size, SHAPES[shape].size).map(v => Math.min(200, Math.max(1, Math.abs(v))));
-    return { name: String(x.name || SHAPES[shape].name).slice(0, 20), shape, hole: !!x.hole, color: hex(x.color) || SHAPES[shape].color, size, position: vec3(x.position, [0, 0, 0]), rotation: vec3(x.rotation, [0, 0, 0]) };
+    // AI 使用「中心點 center」較不易出錯；內部轉成 Tinkercad 的「底部 z」
+    const position = Array.isArray(x.center) ? (c => [c[0], c[1], c[2] - size[2] / 2])(vec3(x.center, [0, 0, size[2] / 2])) : vec3(x.position, [0, 0, 0]);
+    const top = shape === 'cone' ? Math.max(0, Math.min(0.95, num(x.top, 0))) : 0;
+    return { name: String(x.name || SHAPES[shape].name).slice(0, 20), shape, top, hole: !!x.hole, color: hex(x.color) || SHAPES[shape].color, size, position, rotation: vec3(x.rotation, [0, 0, 0]) };
   });
+  // 整體貼齊工作平面（最低點 z = 0），避免 AI 給的高度整體浮空或穿入地面
+  const minZ = Math.min(...parts.filter(q => !q.hole).map(q => q.position[2] + q.size[2] / 2 - halfHeight(q)));
+  if (Number.isFinite(minZ) && Math.abs(minZ) > 0.5) parts.forEach(q => { q.position[2] -= minZ; });
   if (!parts.length) throw new Error('AI 回傳的建模計畫沒有任何零件');
   // 整體太大就等比例縮小到工作平面內
   let ext = 0;
   parts.forEach(q => { ext = Math.max(ext, Math.abs(q.position[0]) + q.size[0] / 2, Math.abs(q.position[1]) + q.size[1] / 2, q.position[2] + q.size[2]); });
   if (ext > 95) { const k = 95 / ext; parts.forEach(q => { q.size = q.size.map(v => v * k); q.position = q.position.map(v => v * k); }); }
   const valid = new Set(OP_IDS);
-  const operations = (Array.isArray(p.operations) ? p.operations : []).filter(o => valid.has(o.id)).map(o => ({ id: o.id, reason: String(o.reason || '') }));
+  const opMap = new Map();
+  (Array.isArray(p.operations) ? p.operations : []).filter(o => valid.has(o.id)).forEach(o => {
+    const r = String(o.reason || ''); if (opMap.has(o.id)) { const e = opMap.get(o.id); if (r && !e.reason.includes(r)) e.reason += '；' + r; } else opMap.set(o.id, { id: o.id, reason: r });
+  });
+  const operations = [...opMap.values()];
   let steps = (Array.isArray(p.steps) ? p.steps : []).filter(s => valid.has(s.op)).map(s => ({ op: s.op, parts: (Array.isArray(s.parts) ? s.parts : []).map(n => num(n, -1)).filter(n => n >= 0 && n < parts.length), text: String(s.text || '') }));
   if (!steps.length) steps = autoSteps(parts);
   // 每個挖空零件都要出現在某個「挖空」步驟
@@ -30,8 +40,23 @@ export function sanitizePlan(raw) {
   if (missing.length) { const gi = steps.findIndex(s => s.op === 'group'); const hs = { op: 'hole', parts: missing, text: '把要挖掉的零件設為挖空' }; gi >= 0 ? steps.splice(gi, 0, hs) : steps.push(hs); }
   const ops = new Set(operations.map(o => o.id));
   steps.forEach(s => { if (!ops.has(s.op)) { ops.add(s.op); operations.push({ id: s.op, reason: s.text }); } });
-  return { object: String(p.object || '模型'), summary: String(p.summary || ''), difficulty: String(p.difficulty || ''), operations, parts, steps };
+  return { object: String(p.object || '模型'), observation: String(p.observation || ''), summary: String(p.summary || ''), difficulty: String(p.difficulty || ''), operations, parts, steps };
 }
+
+// 旋轉後零件在 z 方向的半高（用來把模型貼齊地面）
+function halfHeight(q) {
+  const e = new THREE.Euler(q.rotation[0] * Math.PI / 180, q.rotation[2] * Math.PI / 180, -q.rotation[1] * Math.PI / 180, 'YXZ');
+  const m = new THREE.Matrix4().makeRotationFromEuler(e).elements; // three: x, y(上), z
+  const [sx, sy, sz] = [q.size[0], q.size[2], q.size[1]];
+  return (Math.abs(m[1]) * sx + Math.abs(m[5]) * sy + Math.abs(m[9]) * sz) / 2;
+}
+// 轉回 AI 使用的中心點格式（自我檢查時回傳給 AI）
+export function toAIJson(plan) {
+  return JSON.stringify({ object: plan.object, observation: plan.observation, summary: plan.summary, difficulty: plan.difficulty, operations: plan.operations,
+    parts: plan.parts.map(q => ({ name: q.name, shape: q.shape, ...(q.top ? { top: q.top } : {}), hole: q.hole, color: q.color, size: q.size.map(r1), center: [r1(q.position[0]), r1(q.position[1]), r1(q.position[2] + q.size[2] / 2)], rotation: q.rotation.map(r1) })),
+    steps: plan.steps });
+}
+const r1 = v => Math.round(v * 10) / 10;
 
 function autoSteps(parts) {
   const all = parts.map((_, i) => i), holes = all.filter(i => parts[i].hole);
@@ -63,7 +88,7 @@ export async function playPlan(D, plan, hooks = {}) {
     if (st[i].obj) return st[i].obj;
     const f = final(i);
     const direct = !willMove.has(i);
-    const o = await D.spawn(f.shape, direct ? [f.position[0], f.position[1], 0] : stage(i), { name: f.name, color: willColor.has(i) ? undefined : f.color });
+    const o = await D.spawn(f.shape, direct ? [f.position[0], f.position[1], 0] : stage(i), { name: f.name, top: f.top, color: willColor.has(i) ? undefined : f.color });
     st[i].obj = o; if (direct) st[i].xy = true; if (!willColor.has(i)) st[i].color = true; return o;
   }
   const live = list => list.filter(i => !st[i].grouped);
@@ -94,7 +119,7 @@ export async function playPlan(D, plan, hooks = {}) {
           if (st[i].obj) continue;
           await D.clickEl(D.btn('duplicate'), 450); S.keys(['Ctrl', '+', 'D']);
           const f = final(i);
-          const o = S.add(f.shape, { pos: so.pos.slice(), size: so.size.slice(), rot: so.rot.slice(), color: so.color, hole: so.hole, name: f.name });
+          const o = S.add(f.shape, { pos: so.pos.slice(), size: so.size.slice(), rot: so.rot.slice(), color: so.color, hole: so.hole, name: f.name, top: f.top });
           st[i].obj = o; S.select(o);
           await D.dragObj(o, () => S.anim(o, { pos: f.position, size: f.size, rot: f.rotation }, 800));
           Object.assign(st[i], { size: true, rot: true, z: true, xy: true });

@@ -39,13 +39,15 @@ function prism(points) {
   return g;
 }
 const geoCache = {};
-export function getGeo(shape) {
-  if (geoCache[shape]) return geoCache[shape];
+export function getGeo(shape, top = 0) {
+  top = shape === 'cone' ? Math.max(0, Math.min(0.95, +top || 0)) : 0;
+  const key = shape + (top ? ':' + top.toFixed(2) : '');
+  if (geoCache[key]) return geoCache[key];
   let g;
   switch (shape) {
     case 'cylinder': g = new THREE.CylinderGeometry(0.5, 0.5, 1, 48); break;
     case 'sphere': g = new THREE.SphereGeometry(0.5, 40, 24); break;
-    case 'cone': g = new THREE.ConeGeometry(0.5, 1, 48); break;
+    case 'cone': g = top ? new THREE.CylinderGeometry(0.5 * top, 0.5, 1, 48) : new THREE.ConeGeometry(0.5, 1, 48); break;
     case 'roof': g = prism([[-0.5, -0.5], [0.5, -0.5], [0, 0.5]]); break;
     case 'wedge': g = prism([[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5]]); break;
     case 'pyramid': g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4); g.rotateY(Math.PI / 4); break;
@@ -65,8 +67,13 @@ export function getGeo(shape) {
     default: g = new THREE.BoxGeometry(1, 1, 1);
   }
   if (g.index) g = g.toNonIndexed();
-  geoCache[shape] = normalize(g);
-  return geoCache[shape];
+  if (top) { // 截頭圓錐：底部直徑固定為 1，維持外框 1×1×1
+    g.computeBoundingBox(); const b = g.boundingBox; g.translate(0, -(b.min.y + b.max.y) / 2, 0); g.computeVertexNormals();
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    geoCache[key] = g; return g;
+  }
+  geoCache[key] = normalize(g);
+  return geoCache[key];
 }
 
 /* ---------------- 挖空條紋材質 ---------------- */
@@ -98,7 +105,8 @@ export class Part {
     this.hole = !!o.hole;
     this.opacity = o.opacity ?? 1;
     this.name = o.name || def.name;
-    this.mesh = new THREE.Mesh(getGeo(this.shape), null);
+    this.topR = o.top || 0;
+    this.mesh = new THREE.Mesh(getGeo(this.shape, this.topR), null);
     this.mesh.castShadow = true; this.mesh.receiveShadow = true;
     this.updateMat();
     stage.root.add(this.mesh);
@@ -444,5 +452,70 @@ export class Stage {
     const insp = this.host.querySelector('.inspector'); if (insp) insp.classList.remove('show');
     this.cur = { x: this.w * 0.55 || 300, y: this.h * 0.8 || 300 };
   }
+}
+
+/* ---------------- 預覽截圖（給 AI 自我檢查用） ---------------- */
+// plan.parts 以 Tinkercad 座標表示；輸出一張含「正面 / 右側 / 斜角 / 俯視」四格的 JPEG
+export function snapshotPlan(parts, cell = 360) {
+  const W = cell * 2, H = cell * 2;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(cell, cell, false); renderer.setPixelRatio(1); renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xf4f7fb);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb9c7d6, 1.3));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(80, 200, 140); scene.add(dl);
+  const grid = new THREE.GridHelper(200, 20, 0x9fb7cf, 0xc9d7e4); scene.add(grid);
+  const root = new THREE.Group(); scene.add(root);
+  const fake = { root };
+  const objs = parts.map(p => new Part(fake, p.shape, { size: p.size, pos: p.position, rot: p.rotation, color: p.color, hole: p.hole, top: p.top }));
+  const box = new THREE.Box3(); objs.forEach(o => box.union(o.box()));
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+  // 座標軸提示（放在模型左前方）：紅 +x(右)、綠 +y(後)、藍 +z(上)
+  const L = Math.max(12, Math.max(sz.x, sz.z) * 0.25), O = new THREE.Vector3(box.min.x - L * 0.6, 0.2, box.max.z + L * 0.6);
+  const ax = (dir, col) => scene.add(new THREE.ArrowHelper(dir, O, L, col, L * 0.25, L * 0.15));
+  ax(new THREE.Vector3(1, 0, 0), 0xe53935); ax(new THREE.Vector3(0, 0, -1), 0x43a047); ax(new THREE.Vector3(0, 1, 0), 0x1e63d6);
+  const R = Math.max(sz.x, sz.y, sz.z, 30) * 1.25 + L * 1.6;
+  const cam = new THREE.OrthographicCamera(-R / 2 * 1.1, R / 2 * 1.1, R / 2 * 1.1, -R / 2 * 1.1, 1, 2000);
+  const views = [['正面 front (看向 +y)', [0, 0, 1]], ['右側 right (看向 -x)', [1, 0, 0]], ['斜角 iso', [0.6, 0.55, 0.6]], ['俯視 top', [0, 1, 0.0001]]];
+  const out = document.createElement('canvas'); out.width = W; out.height = H; const ctx = out.getContext('2d');
+  views.forEach(([name, d], i) => {
+    const v = new THREE.Vector3(...d).normalize();
+    cam.position.copy(c).addScaledVector(v, 600); cam.up.set(0, 1, 0); if (d[1] > 0.99) cam.up.set(0, 0, -1);
+    cam.lookAt(c); cam.updateProjectionMatrix();
+    renderer.render(scene, cam);
+    const x = (i % 2) * cell, y = Math.floor(i / 2) * cell;
+    ctx.drawImage(renderer.domElement, x, y);
+    ctx.strokeStyle = '#999'; ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 16px sans-serif'; ctx.fillText(name, x + 8, y + 22);
+  });
+  objs.forEach(o => o.mesh.material.dispose()); renderer.dispose();
+  return out.toDataURL('image/jpeg', 0.85);
+}
+
+/* ---------------- 匯出 STL（Z 軸朝上，單位 mm） ---------------- */
+export function exportSTL(objects) {
+  const toZup = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+  const tris = [];
+  for (const o of objects) {
+    if (!o.mesh.visible || o.hole) continue;
+    o.mesh.updateMatrixWorld(true);
+    let g = o.mesh.geometry.index ? o.mesh.geometry.toNonIndexed() : o.mesh.geometry.clone();
+    const m = toZup.clone().multiply(o.mesh.matrixWorld);
+    g.applyMatrix4(m);
+    const flip = m.determinant() < 0, p = g.attributes.position.array;
+    for (let i = 0; i < p.length; i += 9) tris.push(flip ? [p[i], p[i + 1], p[i + 2], p[i + 6], p[i + 7], p[i + 8], p[i + 3], p[i + 4], p[i + 5]] : Array.from(p.slice(i, i + 9)));
+    g.dispose();
+  }
+  const buf = new ArrayBuffer(84 + tris.length * 50), dv = new DataView(buf);
+  const head = 'Tinkercad tutorial export'; for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
+  dv.setUint32(80, tris.length, true);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), cc = new THREE.Vector3(), n = new THREE.Vector3();
+  tris.forEach((t, k) => {
+    let off = 84 + k * 50;
+    a.set(t[0], t[1], t[2]); b.set(t[3], t[4], t[5]); cc.set(t[6], t[7], t[8]);
+    n.subVectors(cc, b).cross(a.clone().sub(b)).normalize();
+    for (const v of [n.x, n.y, n.z, ...t]) { dv.setFloat32(off, v || 0, true); off += 4; }
+    dv.setUint16(off, 0, true);
+  });
+  return new Blob([buf], { type: 'model/stl' });
 }
 export { THREE };

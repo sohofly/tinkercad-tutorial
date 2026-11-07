@@ -1,8 +1,10 @@
 import { Stage, SHAPES, ABORT } from './scene.js';
 import { Director } from './director.js';
 import { FEATURES, CATS } from './demos.js';
-import { playPlan, sanitizePlan, SAMPLES } from './plan.js';
-import { analyzePhotos, shrinkImage } from './ai.js';
+import { playPlan, sanitizePlan, toAIJson, SAMPLES } from './plan.js';
+import { analyzePhotos, reviewPlan, shrinkImage } from './ai.js';
+import { snapshotPlan, exportSTL } from './scene.js';
+import { recordAnimation, canRecord, saveBlob } from './recorder.js';
 import { FICON, SICON } from './icons.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -39,7 +41,7 @@ function viewportHTML() {
   <div class="overlay"></div>`;
 }
 
-function makePlayer(root) {
+function makePlayer(root, getName) {
   const area = $('.stage-area', root);
   area.innerHTML = viewportHTML();
   const stage = new Stage(area);
@@ -50,19 +52,49 @@ function makePlayer(root) {
   $$('[data-speed]', ctrl).forEach(b => b.onclick = () => { stage.tl.speed = +b.dataset.speed; $$('[data-speed]', ctrl).forEach(x => x.classList.toggle('on', x === b)); });
   $('[data-c=replay]', ctrl).innerHTML = FICON.replay + '<span>重播</span>';
   const cap = $('.caption', ctrl);
-  let runId = 0;
-  return {
+  let runId = 0, replayFn = null, endWaiters = [];
+  const P = {
     stage,
     caption(t) { cap.innerHTML = t; },
     async run(fn, hooks) {
       const id = ++runId;
       stage.reset(); setPaused(false); root.classList.remove('ended');
       const D = new Director(stage, hooks);
-      try { await fn(D); if (id === runId) { root.classList.add('ended'); hooks.end && hooks.end(); } }
-      catch (e) { if (e !== ABORT) { console.error(e); cap.textContent = '動畫發生錯誤：' + e.message; } }
+      try {
+        await fn(D);
+        if (id === runId) { root.classList.add('ended'); hooks.end && hooks.end(); const w = endWaiters; endWaiters = []; w.forEach(r => r()); }
+      } catch (e) { if (e !== ABORT) { console.error(e); cap.textContent = '動畫發生錯誤：' + e.message; } }
     },
-    onReplay(f) { $('[data-c=replay]', ctrl).onclick = f; },
+    onReplay(f) { replayFn = f; $('[data-c=replay]', ctrl).onclick = f; },
+    waitEnd() { return new Promise(r => endWaiters.push(r)); },
   };
+  // 下載動畫影片
+  const recBtn = $('[data-c=rec]', ctrl);
+  if (recBtn) {
+    const label = () => { recBtn.innerHTML = '<span class="rec-dot"></span><span>下載影片</span>'; };
+    label();
+    if (!canRecord()) recBtn.hidden = true;
+    let recording = false;
+    recBtn.onclick = async () => {
+      if (recording) { const w = endWaiters; endWaiters = []; w.forEach(r => r()); return; } // 提前結束
+      if (!replayFn) return;
+      recording = true; root.classList.add('recording');
+      recBtn.innerHTML = '<span class="rec-dot on"></span><span>錄影中…按此停止</span>';
+      try {
+        const name = (getName ? getName() : 'tinkercad') + '_模擬動畫';
+        const r = await recordAnimation({ cropTarget: root, area, captionEl: cap, replay: replayFn, waitEnd: () => P.waitEnd(), filename: name,
+          onStatus: m => toast(m === 'tab' ? '錄影中：動畫播完會自動下載（錄影時請不要切換分頁）' : '錄影中（相容模式：只錄 3D 畫面與字幕）') });
+        toast(`影片已下載（.${r.ext}）`);
+      } catch (e) { toast('⚠ ' + (e.message || e)); }
+      finally { recording = false; root.classList.remove('recording'); label(); }
+    };
+  }
+  return P;
+}
+let toastTimer;
+function toast(msg) {
+  let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4500);
 }
 
 /* ---------- 分頁 ---------- */
@@ -73,7 +105,7 @@ function showTab(name) {
 $$('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 
 /* ---------- 功能示範 ---------- */
-const P1 = makePlayer($('#player-demo'));
+const P1 = makePlayer($('#player-demo'), () => current ? current.name : 'tinkercad');
 const list = $('#feature-list');
 list.innerHTML = CATS.map(c => `<h3>${c}</h3><div class="fgrid">${FEATURES.filter(f => f.cat === c).map(f => `
   <button class="feat" data-id="${f.id}"><span class="ficon">${FICON[f.id]}</span><b>${f.name}</b><small>${esc(f.key)}</small></button>`).join('')}</div>`).join('');
@@ -102,7 +134,7 @@ list.onclick = e => { const b = e.target.closest('.feat'); if (b) playFeature(b.
 P1.onReplay(() => playFeature(current.id));
 
 /* ---------- 照片 → AI 建議 ---------- */
-const P2 = makePlayer($('#player-ai'));
+const P2 = makePlayer($('#player-ai'), () => (plan ? plan.object : 'tinkercad'));
 let photos = []; // {file, url}
 let plan = null;
 const thumbs = $('#thumbs'), fileIn = $('#file-in');
@@ -125,26 +157,53 @@ renderThumbs();
 
 const keyIn = $('#api-key'), remember = $('#remember'), modelIn = $('#model');
 keyIn.value = store.get('tc_openai_key') || ''; remember.checked = !!keyIn.value;
-modelIn.value = store.get('tc_openai_model') || 'gpt-4o-mini';
-const saveKey = () => { store.set('tc_openai_key', remember.checked && keyIn.value ? keyIn.value.trim() : null); store.set('tc_openai_model', modelIn.value.trim() || null); };
+modelIn.value = store.get('tc_openai_model2') || 'gpt-5-mini';
+const saveKey = () => { store.set('tc_openai_key', remember.checked && keyIn.value ? keyIn.value.trim() : null); store.set('tc_openai_model2', modelIn.value.trim() || null); };
 remember.onchange = saveKey; keyIn.onchange = saveKey; modelIn.onchange = saveKey;
 $('#toggle-key').onclick = () => { keyIn.type = keyIn.type === 'password' ? 'text' : 'password'; };
 
 const status = $('#ai-status');
 function setStatus(html, cls = '') { status.className = 'status ' + cls; status.innerHTML = html; }
 
+const refineIn = $('#refine');
+refineIn.checked = store.get('tc_refine') !== '0';
+refineIn.onchange = () => store.set('tc_refine', refineIn.checked ? '1' : '0');
 $('#btn-analyze').onclick = async () => {
   const btn = $('#btn-analyze'); btn.disabled = true; saveKey();
-  setStatus('<span class="spin"></span>AI 正在觀察照片並規劃建模步驟…（約 10~40 秒）', 'busy');
+  const t0 = Date.now(), sec = () => Math.round((Date.now() - t0) / 1000);
+  let tick;
+  const busy = msg => { clearInterval(tick); const f = () => setStatus(`<span class="spin"></span>${msg}（${sec()} 秒）`, 'busy'); f(); tick = setInterval(f, 1000); };
   try {
     const images = await Promise.all(photos.map(p => shrinkImage(p.file)));
-    const raw = await analyzePhotos({ key: keyIn.value, model: modelIn.value.trim(), images, note: $('#note').value.trim() });
-    plan = sanitizePlan(raw);
-    setStatus(`完成！AI 辨識為「${esc(plan.object)}」，下方開始播放建模模擬。`, 'ok');
+    const opts = { key: keyIn.value, model: modelIn.value.trim(), images, note: $('#note').value.trim() };
+    busy(`第 1 步：AI 觀察照片並規劃建模${refineIn.checked ? '（共 2 步）' : ''}…`);
+    let p1 = sanitizePlan(await analyzePhotos(opts)), checked = false;
+    if (refineIn.checked) {
+      busy('第 2 步：AI 檢查 3D 預覽圖並修正方向、比例…');
+      try {
+        const preview = snapshotPlan(p1.parts);
+        p1 = sanitizePlan(await reviewPlan({ ...opts, planJson: toAIJson(p1), preview })); checked = true;
+      } catch (e) { console.warn('自我檢查失敗，使用第一版', e); }
+    }
+    plan = p1;
+    clearInterval(tick);
+    setStatus(`完成！AI 辨識為「${esc(plan.object)}」${checked ? '，已自我檢查修正' : ''}（${sec()} 秒），右方開始播放建模模擬。`, 'ok');
+    saveHistory(plan);
     showPlan();
-  } catch (e) { console.error(e); setStatus('⚠ ' + esc(e.message || e), 'err'); }
+  } catch (e) { clearInterval(tick); console.error(e); setStatus('⚠ ' + esc(e.message || e), 'err'); }
   finally { btn.disabled = !photos.length; }
 };
+// 最近的分析結果（存在瀏覽器，免得重新呼叫 API）
+const HKEY = 'tc_history';
+const getHistory = () => { try { return JSON.parse(store.get(HKEY) || '[]'); } catch { return []; } };
+function saveHistory(p) { const h = getHistory().filter(x => x.object !== p.object); h.unshift({ ...p, savedAt: Date.now() }); store.set(HKEY, JSON.stringify(h.slice(0, 6))); renderHistory(); }
+function renderHistory() {
+  const h = getHistory(), box = $('#history');
+  box.parentElement.hidden = !h.length;
+  box.innerHTML = h.map((p, i) => `<button data-hist="${i}" title="${new Date(p.savedAt).toLocaleString()}">${esc(p.object)}</button>`).join('');
+}
+$('#history').onclick = e => { const b = e.target.closest('[data-hist]'); if (!b) return; plan = sanitizePlan(getHistory()[+b.dataset.hist]); setStatus(`載入先前結果：${esc(plan.object)}`, 'ok'); showPlan(); };
+renderHistory();
 $('#samples').innerHTML = SAMPLES.map((s, i) => `<button data-sample="${i}">${s.object}</button>`).join('');
 $('#samples').onclick = e => { const b = e.target.closest('[data-sample]'); if (!b) return; plan = sanitizePlan(SAMPLES[+b.dataset.sample]); setStatus(`範例：${esc(plan.object)}（不需 API 金鑰）`, 'ok'); showPlan(); };
 
@@ -154,13 +213,15 @@ function showPlan() {
   r.innerHTML = `
     <div class="res-head"><h2>${esc(plan.object)}</h2>${plan.difficulty ? `<span class="kbd-badge">${esc(plan.difficulty)}</span>` : ''}</div>
     <p class="desc">${esc(plan.summary)}</p>
+    ${plan.observation ? `<details class="obs"><summary>AI 的觀察與結構分析</summary><p>${esc(plan.observation)}</p></details>` : ''}
+    <div class="dl-row"><button data-dl="stl">⬇ 下載 STL（可匯入 Tinkercad）</button><button data-dl="json">⬇ 建模資料 JSON</button></div>
     <h4>建議使用的操作功能 <small>（點選可看該功能的示範）</small></h4>
     <div class="op-list">${plan.operations.map(o => { const f = FEATURES.find(x => x.id === o.id); return `<button class="op" data-op="${o.id}"><span class="ficon">${FICON[o.id]}</span><span><b>${f.name}</b><small>${esc(o.reason)}</small></span></button>`; }).join('')}</div>
     <h4>建模步驟</h4>
     <ol class="steps plan-steps">${plan.steps.map(s => `<li><span class="op-tag">${FEATURES.find(x => x.id === s.op).name}</span>${esc(s.text)}</li>`).join('')}<li class="final">檢查並完成模型</li></ol>
     <h4>零件清單 <small>（單位 mm）</small></h4>
     <div class="tbl-wrap"><table class="parts"><thead><tr><th>#</th><th>零件</th><th>形狀</th><th>長×寬×高</th><th>位置 X,Y,Z</th><th>旋轉</th></tr></thead><tbody>
-    ${plan.parts.map((p, i) => `<tr><td>${i}</td><td><i class="dot ${p.hole ? 'hole' : ''}" style="${p.hole ? '' : 'background:' + p.color}"></i>${esc(p.name)}</td><td>${SHAPES[p.shape].name}${p.hole ? '（挖空）' : ''}</td><td>${p.size.map(v => +v.toFixed(1)).join('×')}</td><td>${p.position.map(v => +v.toFixed(1)).join(', ')}</td><td>${p.rotation.some(v => v) ? p.rotation.map(v => +v.toFixed(0)).join(', ') : '—'}</td></tr>`).join('')}
+    ${plan.parts.map((p, i) => `<tr><td>${i}</td><td><i class="dot ${p.hole ? 'hole' : ''}" style="${p.hole ? '' : 'background:' + p.color}"></i>${esc(p.name)}</td><td>${SHAPES[p.shape].name}${p.top ? `（頂/底 ${Math.round(p.top * 100)}%）` : ''}${p.hole ? '（挖空）' : ''}</td><td>${p.size.map(v => +v.toFixed(1)).join('×')}</td><td>${p.position.map(v => +v.toFixed(1)).join(', ')}</td><td>${p.rotation.some(v => v) ? p.rotation.map(v => +v.toFixed(0)).join(', ') : '—'}</td></tr>`).join('')}
     </tbody></table></div>`;
   $('#player-ai').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   runPlan();
@@ -177,7 +238,23 @@ function runPlan() {
   }), { end() { P2.caption(`「${esc(plan.object)}」建模模擬完成！`); } });
 }
 P2.onReplay(runPlan);
-$('#ai-result').addEventListener('click', e => { const b = e.target.closest('[data-op]'); if (b) { showTab('demo'); playFeature(b.dataset.op, true); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+$('#ai-result').addEventListener('click', e => {
+  const d = e.target.closest('[data-dl]');
+  if (d && plan) {
+    if (d.dataset.dl === 'json') saveBlob(new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' }), `${plan.object}_建模資料.json`);
+    else {
+      if (!P2.stage.objects.length || !$('#player-ai').classList.contains('ended')) { toast('請等動畫播放完成（模型組合好）再下載 STL'); return; }
+      saveBlob(exportSTL(P2.stage.objects), `${plan.object}.stl`); toast('STL 已下載：在 Tinkercad 按「匯入」即可載入');
+    }
+    return;
+  }
+  const b = e.target.closest('[data-op]'); if (b) { showTab('demo'); playFeature(b.dataset.op, true); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+
+$('#json-in').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try { plan = sanitizePlan(JSON.parse(await f.text())); setStatus(`已載入：${esc(plan.object)}`, 'ok'); showTab('ai'); showPlan(); }
+  catch (err) { setStatus('⚠ 檔案格式不正確：' + esc(err.message), 'err'); }
+};
 
 /* ---------- 啟動 ---------- */
 const start = (location.hash || '').slice(1);
