@@ -6,9 +6,16 @@ export default {
     {
       "label": "老師",
       "iter": 600000,
-      "salt": "mmEJcXCkcx1+MpD038dauA==",
-      "iv": "ODRbjOlBoW+f3wyX",
-      "data": "ItSKDkAVJgRH528DmY1xATU2Nn/UAHDDV/0cF4xW2t8I1GlDpuBB4bl4BLxunzzst7WbXCvcVeH6X6EGuOFsbQ9jRj8ZAVFw1JRCpBiyTOPwCN1mcl2+3TyzriTXX52K+Ame+opZtXfgymeVO5VYM8Fmhp7tSlkecSLJG7UfvY0o49BcY3NboSbrpBBgHXz5qK++EMazmab2zjmZnUWu0pkwsG5VrmlOQG2lW6XhvkNSLdf9"
+      "salt": "LaDBwY+AhS4BHbMFiRdT5w==",
+      "iv": "7pvI9zPdQIsD3l62",
+      "data": "d/0q2kmfDhAQOyGC5jJm6kfbVB7A86MkFUw3cTH3kbrA69BDVa/4GrZK+U6n5r4hlQWoBK1wq54oFIYEzFTsLfZIsTyTyPW1MsTY2e4kEcNJhhMb+FBJ0T+YTXe/I2qvZvLN03bsJxUCwOMxpCxuUfsH2Bx3Ul0Rc54uqaXwEEiqIAMumLko//iJkTzjnFbQosCyu16tAfYesSpDjAKDBEzN8PCaif2ovNp2IMaCyiloArnN"
+    },
+    {
+      "label": "學生",
+      "iter": 600000,
+      "salt": "FDO/LweuC42bB7ssGL2ldA==",
+      "iv": "tCtaPsWQzKvyy7rf",
+      "data": "aIxHg/KESZlHjGjBkOPnDx5sgLaJPSHFSSuqquQRC8/RPXZxoRTKd+JuDxmjspfmA3FEq9csrOoyAMhjcazGtZKr/60MVlyZjVy9Dki0w2YBA9HWn6/lGY97UwcTQTAu/EvH0ioGRhT6zuQnfRUR79v56BXZpB4QpkQjtIZjeokea9DOVeACtjLjcTqz190G1CqsalwSPgEsYOzcr10D6EkhspF4tfF43GRYhUIvJyRTh+Dc"
     }
   ]
 };
