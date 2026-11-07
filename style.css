@@ -218,3 +218,21 @@ table.parts { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .viewcube { left: 6px; transform: scale(.8); transform-origin: top left; }
   .view-btns { left: 10px; top: 124px; }
 }
+
+/* ---------- v2：錄影、下載、提示 ---------- */
+.rec-dot { width: 11px; height: 11px; border-radius: 50%; background: #e8432f; display: inline-block; }
+.rec-dot.on { animation: blinkdot 1s infinite; }
+@keyframes blinkdot { 50% { opacity: .2; } }
+.player.recording { outline: 3px solid #e8432f; outline-offset: -1px; }
+.player.recording [data-c=rec] { border-color: #e8432f; color: #e8432f; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: #1d2733; color: #fff; padding: 10px 18px; border-radius: 12px; font-size: 14px; opacity: 0; transition: .25s; z-index: 100; pointer-events: none; max-width: calc(100vw - 32px); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+.obs { margin: 0 0 12px; background: var(--soft); border-radius: 10px; padding: 8px 12px; font-size: 13.5px; }
+.obs summary { cursor: pointer; font-weight: 700; color: var(--brand); }
+.obs p { margin: 6px 0 0; }
+.dl-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.dl-row button { border: 1px solid var(--line); background: var(--panel); padding: 6px 10px; border-radius: 9px; font-size: 13px; font-weight: 700; }
+.dl-row button:hover { border-color: var(--brand); color: var(--brand); }
+.load-json { font-size: 13px; color: var(--muted); cursor: pointer; text-align: center; padding: 4px; }
+.load-json:hover { color: var(--brand); }
+.hint b { color: var(--ink); }

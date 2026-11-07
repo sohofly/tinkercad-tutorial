@@ -36,6 +36,7 @@
     <div class="controls">
       <button data-c="replay"></button>
       <button data-c="pause"></button>
+      <button data-c="rec" title="從頭重播並錄成影片下載"></button>
       <div class="speed"><span>速度</span><button data-speed="0.5">0.5×</button><button data-speed="1" class="on">1×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2×</button></div>
       <div class="caption"></div>
     </div>
@@ -58,9 +59,11 @@
       </label>
       <label class="chk"><input type="checkbox" id="remember"> 記住金鑰（只存在這台電腦的瀏覽器）</label>
       <label class="fld">模型
-        <input id="model" list="models" placeholder="gpt-4o-mini">
-        <datalist id="models"><option value="gpt-4o-mini"><option value="gpt-4o"><option value="gpt-4.1-mini"><option value="gpt-4.1"><option value="gpt-5-mini"></datalist>
+        <input id="model" list="models" placeholder="gpt-5-mini">
+        <datalist id="models"><option value="gpt-5-mini"><option value="gpt-5"><option value="gpt-4.1"><option value="gpt-4.1-mini"><option value="gpt-4o"><option value="gpt-4o-mini"></datalist>
       </label>
+      <p class="hint">建議 <b>gpt-5-mini</b>（立體方向判斷較準，約 30~90 秒）；gpt-4o-mini 較快較便宜，但常把橫躺的零件做成直立。</p>
+      <label class="chk"><input type="checkbox" id="refine" checked> AI 自我檢查：把 3D 預覽圖給 AI 比對照片後修正（較準確，多一次呼叫）</label>
       <p class="hint">金鑰只會從你的瀏覽器直接送到 OpenAI，不經過任何其他伺服器。課堂公用電腦請勿勾選「記住」。</p>
     </section>
     <button id="btn-analyze" class="primary" disabled>✦ 分析照片並產生建模動畫</button>
@@ -69,12 +72,18 @@
       <h3>沒有金鑰？先看範例</h3>
       <div id="samples" class="samples"></div>
     </section>
+    <section class="card samples-card" hidden>
+      <h3>最近的分析結果 <small>存在這台電腦的瀏覽器，不需重新呼叫 AI</small></h3>
+      <div id="history" class="samples"></div>
+    </section>
+    <label class="load-json">📂 載入建模資料 JSON<input type="file" id="json-in" accept=".json,application/json" hidden></label>
   </aside>
   <section class="player" id="player-ai">
     <div class="stage-area"></div>
     <div class="controls">
       <button data-c="replay"></button>
       <button data-c="pause"></button>
+      <button data-c="rec" title="從頭重播並錄成影片下載"></button>
       <div class="speed"><span>速度</span><button data-speed="0.5">0.5×</button><button data-speed="1" class="on">1×</button><button data-speed="1.5">1.5×</button><button data-speed="2">2×</button></div>
       <div class="caption">上傳照片後按「分析」，或點左下角的範例。</div>
     </div>
