@@ -22,9 +22,14 @@
   （因使用 ES 模組，直接雙擊 `index.html` 可能無法執行）
 - 網址加上 `#group`、`#rotate` 等可直接開啟指定功能；`#ai` 直接開啟 AI 頁。
 
-## 關於 API 金鑰
+## 密碼與 API 金鑰
 
-金鑰只會由瀏覽器直接送到 `api.openai.com`，不經過其他伺服器；勾選「記住」才會存在該瀏覽器的 localStorage。課堂公用電腦請勿勾選。預設模型 `gpt-5-mini`（立體方向判斷較準）；`gpt-4o-mini` 較快較便宜但準確度較低。
+- AI 建模建議需要**密碼**才能使用（範例、最近結果不需密碼）。
+- OpenAI API 金鑰以密碼加密（PBKDF2-SHA256 60 萬次 + AES-GCM）存在 `config.js`，網站公開也只看得到亂碼；輸入正確密碼後才在瀏覽器內解開，直接呼叫 `api.openai.com`。
+- 可設定多組密碼（例如老師、各班），勾選「記住這台裝置」下次免輸入。
+- **管理**：開啟 `admin.html` → 貼上金鑰、設定密碼 → 下載新的 `config.js` → 上傳到 GitHub 覆蓋，約 1 分鐘生效；刪掉某組密碼即停用。
+- 知道密碼的人可從開發者工具看到金鑰，請使用設有**每月花費上限**的專用 Project 金鑰，並定期更換。
+- 請勿把含有明碼金鑰的檔案（例如 `key.txt`）上傳到 GitHub。預設模型 `gpt-5-mini`（立體方向判斷較準）；`gpt-4o-mini` 較快較便宜但準確度較低。
 
 ## 檔案結構
 
@@ -37,6 +42,9 @@ js/demos.js       16 項功能的示範腳本
 js/plan.js        AI/範例建模計畫 → 模擬動畫；離線範例
 js/ai.js          OpenAI API 呼叫、提示詞、自我檢查
 js/recorder.js    動畫錄影下載
+js/vault.js       密碼解鎖與金鑰加解密
+config.js         加密後的金鑰（由 admin.html 產生）
+admin.html        密碼與金鑰管理頁
 js/icons.js       圖示
 vendor/           three.js、three-mesh-bvh、three-bvh-csg（MIT）
 ```

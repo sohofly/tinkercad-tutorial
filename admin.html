@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>密碼與金鑰管理</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: 0 16px; }
+  .wrap { max-width: 760px; margin: 24px auto 48px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  .card h3 { font-size: 15px; }
+  input[type=text], input[type=password] { width: 100%; font: inherit; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+  .row { display: grid; grid-template-columns: 140px 1fr auto auto; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .row button, .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .btn:hover, .row button:hover { border-color: var(--brand); color: var(--brand); }
+  ol { margin: 6px 0 0; padding-left: 20px; } li { margin: 4px 0; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 11.5px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .warn { background: #fff6e5; border: 1px solid #f0c36d; color: #6b4b00; border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+  @media (prefers-color-scheme: dark) { .warn { background: #3a2f17; color: #f3dca5; border-color: #7a5d1d; } }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div><a href="./#ai" class="hint">← 回到教學網頁</a><h1>🔐 AI 功能的密碼與金鑰管理</h1></div>
+
+  <section class="card">
+    <h3>目前設定</h3>
+    <p class="hint" id="cur">讀取中…</p>
+    <div class="keyrow" style="margin-top:8px"><input id="test-pw" type="password" placeholder="輸入一組密碼測試是否有效"><button class="btn" id="btn-test">測試</button></div>
+    <div id="test-msg" class="status" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card">
+    <h3>重新產生設定（更換密碼、新增班級密碼、更換金鑰）</h3>
+    <label class="fld">OpenAI API 金鑰
+      <input id="api" type="password" placeholder="sk-proj-…（只在這台電腦的瀏覽器內加密，不會上傳到任何地方）" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="fld">密碼清單 <span class="hint">（可設定多組，例如「老師」「七年一班」；刪掉某組就等於停用那組密碼）</span></div>
+    <div id="rows"></div>
+    <div class="acts"><button class="btn" id="btn-add">＋ 新增一組密碼</button></div>
+    <div class="acts" style="margin-top:12px"><button class="primary" id="btn-gen">產生新的 config.js</button></div>
+    <div id="gen-msg" class="status" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card" id="out" hidden>
+    <h3>新的 config.js（只包含加密後的資料）</h3>
+    <pre id="code"></pre>
+    <div class="acts"><button class="btn" id="btn-dl">⬇ 下載 config.js</button><button class="btn" id="btn-copy">複製內容</button></div>
+    <h3 style="margin-top:14px">上傳到 GitHub 生效</h3>
+    <ol>
+      <li>開啟 <a id="gh-up" href="https://github.com/sohofly/tinkercad-tutorial/upload/main" target="_blank" rel="noopener">GitHub 上傳頁面</a></li>
+      <li>把剛下載的 <b>config.js</b> 拖進去（會覆蓋舊檔），按「Commit changes」</li>
+      <li>約 1 分鐘後網站更新；舊密碼立即失效（已勾選「記住這台裝置」的電腦也會被要求重新輸入）</li>
+    </ol>
+  </section>
+
+  <div class="warn">
+    <b>安全提醒：</b>金鑰以密碼加密後放在公開網站上，沒有密碼的人看不到金鑰；但<b>知道密碼的人</b>可以從瀏覽器開發者工具看到解開後的金鑰。
+    建議：(1) 在 OpenAI 後台為這個網站建立<b>專用 Project 金鑰</b>並設定<b>每月花費上限</b>；(2) 學期結束或懷疑外流時，到 OpenAI 刪除舊金鑰、建立新金鑰，再用本頁重新產生。
+  </div>
+</div>
+<script type="module">
+import { loadConfig, unlock, makeLock, configText, randomPassword } from './js/vault.js';
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const cfg = await loadConfig();
+$('#cur').innerHTML = cfg.locks.length
+  ? `已設定 <b>${cfg.locks.length}</b> 組密碼：${cfg.locks.map(l => '「' + esc(l.label || '未命名') + '」').join('、')}（更新日期 ${esc(cfg.updated || '—')}）`
+  : '尚未設定任何密碼，AI 功能目前無法使用。';
+$('#btn-test').onclick = async () => {
+  const m = $('#test-msg'); m.className = 'status busy'; m.textContent = '驗證中…';
+  const r = await unlock($('#test-pw').value);
+  m.className = 'status ' + (r ? 'ok' : 'err');
+  m.textContent = r ? `✓ 有效（${r.label}），金鑰結尾 …${r.apiKey.slice(-4)}` : '✗ 這組密碼無效';
+};
+function addRow(label = '', pw = randomPassword()) {
+  const d = document.createElement('div'); d.className = 'row';
+  d.innerHTML = `<input type="text" class="lb" placeholder="名稱，例如 老師" value="${esc(label)}"><input type="text" class="pw" value="${esc(pw)}" spellcheck="false"><button type="button" class="rnd" title="隨機產生">🎲</button><button type="button" class="rm" title="刪除">✕</button>`;
+  d.querySelector('.rnd').onclick = () => { d.querySelector('.pw').value = randomPassword(); };
+  d.querySelector('.rm').onclick = () => d.remove();
+  $('#rows').appendChild(d);
+}
+(cfg.locks.length ? cfg.locks.map(l => l.label) : ['老師']).forEach(l => addRow(l, ''));
+$('#rows').querySelectorAll('.pw').forEach(i => { i.placeholder = '輸入新密碼（或按 🎲）'; });
+$('#btn-add').onclick = () => addRow('', randomPassword());
+let text = '';
+$('#btn-gen').onclick = async () => {
+  const m = $('#gen-msg'), key = $('#api').value.trim();
+  const rows = [...document.querySelectorAll('#rows .row')].map(r => ({ label: r.querySelector('.lb').value.trim() || '未命名', pw: r.querySelector('.pw').value }));
+  if (!/^sk-/.test(key)) { m.className = 'status err'; m.textContent = '請貼上 OpenAI API 金鑰（sk- 開頭）'; return; }
+  if (!rows.length) { m.className = 'status err'; m.textContent = '至少需要一組密碼'; return; }
+  const short = rows.find(r => r.pw.length < 8);
+  if (short) { m.className = 'status err'; m.textContent = `「${short.label}」的密碼太短（至少 8 個字元，建議按 🎲 產生）`; return; }
+  m.className = 'status busy'; m.textContent = '加密中…';
+  const locks = []; for (const r of rows) locks.push(await makeLock(key, r.pw, r.label));
+  text = configText(locks);
+  $('#code').textContent = text; $('#out').hidden = false;
+  m.className = 'status ok'; m.innerHTML = '完成！請記下密碼：' + rows.map(r => `<br>・${esc(r.label)}：<b>${esc(r.pw)}</b>`).join('');
+  $('#api').value = '';
+};
+$('#btn-dl').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/javascript' })); a.download = 'config.js'; a.click(); };
+$('#btn-copy').onclick = async () => { try { await navigator.clipboard.writeText(text); $('#btn-copy').textContent = '已複製 ✓'; } catch { /* ignore */ } };
+</script>
+</body>
+</html>
